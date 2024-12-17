@@ -2,6 +2,11 @@
   <cbc:ID>0</cbc:ID>
   <cbc:InvoicedQuantity unitCode="XPP">1.00</cbc:InvoicedQuantity>
   <cbc:LineExtensionAmount currencyID="EUR">1294.30</cbc:LineExtensionAmount>
+  <cac:AllowanceCharge>
+    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+    <cbc:Amount currencyID="EUR">1.00</cbc:Amount>
+    <cbc:BaseAmount currencyID="EUR">1295.30</cbc:BaseAmount>
+  </cac:AllowanceCharge>
   <cac:Item>
     <cbc:Description>Leimbinder 2x18m; Birke</cbc:Description>
     <cbc:Name>Leimbinder</cbc:Name>
