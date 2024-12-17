@@ -8,5 +8,6 @@ def build_invoice_line
     line_extension_amount: 1294.30,
     item:                  build_item,
     price:                 build_price,
+    allowance_charges:     [build_allowance_charge],
   )
 end
