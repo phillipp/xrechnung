@@ -263,18 +263,31 @@ module Xrechnung
     # Eine Gruppe von Informationselementen, die Informationen über die
     # Umsatzsteueraufschlüsselung in verschiedene Kategorien liefern.
     #
+    # Calculated from the invoice lines unless #calculate_amounts is false.
+    #
     # @!attribute tax_total
     #   @return [Xrechnung::TaxTotal]
-    member :tax_total, type: Xrechnung::TaxTotal, is_private: true
+    member :tax_total, type: Xrechnung::TaxTotal
 
     # DOCUMENT TOTALS BG-22
     #
     # Eine Gruppe von Informationselementen, die die monetären Gesamtbeträge der Rechnung
     # liefern.
     #
+    # Calculated from the invoice lines unless #calculate_amounts is false.
+    #
     # @!attribute legal_monetary_total
     #   @return [Xrechnung::LegalMonetaryTotal]
-    member :legal_monetary_total, type: Xrechnung::LegalMonetaryTotal, is_private: true
+    member :legal_monetary_total, type: Xrechnung::LegalMonetaryTotal
+
+    # Whether #tax_total and #legal_monetary_total are calculated from the invoice lines.
+    #
+    # Set to false to serialize both exactly as assigned, e.g. when the amounts of an
+    # invoice issued by another system (gross prices, rounding amount) must be reproduced.
+    #
+    # @!attribute calculate_amounts
+    #   @return [TrueClass, FalseClass]
+    member :calculate_amounts, type: [TrueClass, FalseClass], default: true
 
     # INVOICE LINE BG-25
     #
@@ -314,7 +327,7 @@ module Xrechnung
     end
 
     def to_xml(indent: 2, target: "")
-      update_amounts
+      update_amounts if calculate_amounts
 
       xml = Builder::XmlMarkup.new(indent: indent, target: target)
       xml.instruct! :xml, version: "1.0", encoding: "UTF-8"

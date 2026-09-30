@@ -199,6 +199,30 @@ RSpec.describe Xrechnung do
       end
     end
 
+    context "with calculate_amounts disabled" do
+      before do
+        doc.calculate_amounts    = false
+        doc.tax_total            = build_tax_total
+        doc.legal_monetary_total = build_legal_monetary_total
+        doc.invoice_lines << build_invoice_line
+      end
+
+      let(:xml_doc) { Nokogiri::XML(doc.to_xml) }
+
+      it "serializes the given tax total" do
+        expect(xml_doc.at_xpath("/ubl:Invoice/cac:TaxTotal/cbc:TaxAmount", namespaces).text).to eq("297.09")
+        expect(xml_doc.xpath("/ubl:Invoice/cac:TaxTotal/cac:TaxSubtotal", namespaces).size).to eq(2)
+      end
+
+      it "serializes the given legal monetary total" do
+        total = xml_doc.at_xpath("/ubl:Invoice/cac:LegalMonetaryTotal", namespaces)
+
+        expect(total.at_xpath("cbc:TaxInclusiveAmount", namespaces).text).to eq("2877.09")
+        expect(total.at_xpath("cbc:PayableRoundingAmount", namespaces).text).to eq("0.00")
+        expect(total.at_xpath("cbc:PayableAmount", namespaces).text).to eq("2877.09")
+      end
+    end
+
     it "omits tag if attribute is set to optional" do
       expect(doc.to_xml).not_to include "<cac:BillingReference"
     end
