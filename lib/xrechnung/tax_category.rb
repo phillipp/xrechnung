@@ -17,6 +17,12 @@ module Xrechnung
     # • O (Services outside scope of tax)
     # • L (Canary Islands general indirect tax)
     # • M (Tax for production, services and importation in Ceuta and Melilla)
+    #
+    # Note: S, Z, E, AE, K, G, L and M require either a seller VAT identifier (BT-31),
+    # a seller tax registration identifier (BT-32), or a seller tax representative
+    # party (BG-11). Xrechnung::Document currently does not support adding the seller
+    # tax representative party.
+    #
     # @!attribute id
     #   @return [String]
     member :id, type: String
@@ -37,13 +43,23 @@ module Xrechnung
     #   @return [String]
     member :tax_exemption_reason, type: String
 
+    def ==(other)
+      return false unless other.is_a?(Xrechnung::TaxCategory)
+
+      id == other.id &&
+        percent == other.percent &&
+        tax_scheme_id == other.tax_scheme_id &&
+        tax_exemption_reason_code == other.tax_exemption_reason_code &&
+        tax_exemption_reason == other.tax_exemption_reason
+    end
+
     # noinspection RubyResolve
-    def to_xml(xml, root_tag_name: :TaxCategory)
+    def to_xml(xml, root_tag_name: :TaxCategory, include_exemption_fields: true)
       xml.cac root_tag_name do
         xml.cbc :ID, id
         xml.cbc :Percent, format("%.2f", percent) unless percent.nil?
 
-        unless tax_exemption_reason_code.nil?
+        if include_exemption_fields && tax_exemption_reason_code.present?
           xml.cbc :TaxExemptionReasonCode, tax_exemption_reason_code
           xml.cbc :TaxExemptionReason, tax_exemption_reason
         end

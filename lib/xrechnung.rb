@@ -1,10 +1,16 @@
-require "xrechnung/version"
 require "date"
+require "builder"
+
+require "active_support/core_ext/object/blank"
+
+require "xrechnung/version"
 require "xrechnung/currency"
 require "xrechnung/quantity"
 require "xrechnung/id"
 require "xrechnung/member_container"
+require "xrechnung/additional_document_reference"
 require "xrechnung/contact"
+require "xrechnung/electronic_address"
 require "xrechnung/party_identification"
 require "xrechnung/party_legal_entity"
 require "xrechnung/party_tax_scheme"
@@ -24,7 +30,6 @@ require "xrechnung/price"
 require "xrechnung/invoice_line"
 require "xrechnung/invoice_document_reference"
 require "xrechnung/invoice_period"
-require "builder"
 
 module Xrechnung
   class Error < StandardError; end
@@ -34,7 +39,7 @@ module Xrechnung
 
     # Default customization specs
     DEFAULT_CUSTOMIZATION_ID = "urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0"
-    DEFAULT_PROFILE_ID = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0"
+    DEFAULT_PROFILE_ID       = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0"
 
     # Document customization identifier
     #
@@ -119,7 +124,7 @@ module Xrechnung
     #
     # @!attribute purchase_order_reference
     #   @return [String]
-    member :purchase_order_reference, type: String, optional: true
+    member :purchase_order_reference, type: String
 
     # Sales order reference BT-14
     #
@@ -167,6 +172,9 @@ module Xrechnung
     #   @return [String]
     member :tax_currency_code, type: String
 
+    # Buyer accounting reference BT-19
+    member :buyer_accounting_reference, type: String, optional: true
+
     # Buyer reference BT-10
     #
     # Ein vom Erwerber zugewiesener und für interne Lenkungszwecke benutzter Bezeichner.
@@ -186,6 +194,11 @@ module Xrechnung
     # @!attribute billing_reference
     #   @return [Xrechnung::InvoiceDocumentReference]
     member :billing_reference, type: Xrechnung::InvoiceDocumentReference, optional: true
+
+    # Additional supporting documents BG-24
+    # @!attribute additional_document_references
+    #   @return [Array]
+    member :additional_document_references, type: Array, default: []
 
     # @!attribute invoice_period
     #   @return [Xrechnung::InvoicePeriod]
@@ -252,7 +265,7 @@ module Xrechnung
     #
     # @!attribute tax_total
     #   @return [Xrechnung::TaxTotal]
-    member :tax_total, type: Xrechnung::TaxTotal
+    member :tax_total, type: Xrechnung::TaxTotal, is_private: true
 
     # DOCUMENT TOTALS BG-22
     #
@@ -261,7 +274,7 @@ module Xrechnung
     #
     # @!attribute legal_monetary_total
     #   @return [Xrechnung::LegalMonetaryTotal]
-    member :legal_monetary_total, type: Xrechnung::LegalMonetaryTotal
+    member :legal_monetary_total, type: Xrechnung::LegalMonetaryTotal, is_private: true
 
     # INVOICE LINE BG-25
     #
@@ -283,16 +296,30 @@ module Xrechnung
     #   @return [Array]
     member :allowance_charges, type: Array, default: []
 
+    COMMON_NAMESPACES = {
+      "xmlns:ubl"          => "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
+      "xmlns:cac"          => "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+      "xmlns:cbc"          => "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+      "xmlns:xsi"          => "http://www.w3.org/2001/XMLSchema-instance",
+      "xsi:schemaLocation" => "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2 http://docs.oasis-open.org/ubl/os-UBL-2.1/xsd/maindoc/UBL-Invoice-2.1.xsd",
+    }.freeze
+
+    def initialize(...)
+      super
+      self.legal_monetary_total ||= Xrechnung::LegalMonetaryTotal.new
+    end
+
+    def prepaid_amount=(value)
+      legal_monetary_total.prepaid_amount = value
+    end
+
     def to_xml(indent: 2, target: "")
+      update_amounts
+
       xml = Builder::XmlMarkup.new(indent: indent, target: target)
       xml.instruct! :xml, version: "1.0", encoding: "UTF-8"
 
-      xml.ubl :Invoice, \
-        "xmlns:ubl"          => "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
-        "xmlns:cac"          => "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
-        "xmlns:cbc"          => "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
-        "xmlns:xsi"          => "http://www.w3.org/2001/XMLSchema-instance",
-        "xsi:schemaLocation" => "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2 http://docs.oasis-open.org/ubl/os-UBL-2.1/xsd/maindoc/UBL-Invoice-2.1.xsd" do
+      xml.ubl :Invoice, COMMON_NAMESPACES do
         xml.cbc :CustomizationID, customization_id
         xml.cbc :ProfileID, profile_id
         xml.cbc :ID, id
@@ -307,16 +334,15 @@ module Xrechnung
         xml.cbc :TaxPointDate, tax_point_date unless tax_point_date.nil?
         xml.cbc :DocumentCurrencyCode, document_currency_code
         xml.cbc :TaxCurrencyCode, tax_currency_code unless tax_currency_code.nil?
+        xml.cbc :AccountingCost, buyer_accounting_reference unless buyer_accounting_reference.nil?
         xml.cbc :BuyerReference, buyer_reference
 
         invoice_period&.to_xml(xml) unless self.class.members[:invoice_period].optional && invoice_period.nil?
 
-        unless self.class.members[:purchase_order_reference].optional && purchase_order_reference.nil? &&
+        unless purchase_order_reference.nil? &&
                self.class.members[:sales_order_reference].optional && sales_order_reference.nil?
           xml.cac :OrderReference do
-            unless self.class.members[:purchase_order_reference].optional && purchase_order_reference.nil?
-              xml.cbc :ID, purchase_order_reference
-            end
+            xml.cbc :ID, purchase_order_reference
             unless self.class.members[:sales_order_reference].optional && sales_order_reference.nil?
               xml.cbc :SalesOrderID, sales_order_reference
             end
@@ -341,6 +367,8 @@ module Xrechnung
           end
         end
 
+        additional_document_references.each { _1.to_xml(xml) }
+
         xml.cac :AccountingSupplierParty do
           accounting_supplier_party&.to_xml(xml)
         end
@@ -355,21 +383,21 @@ module Xrechnung
           end
         end
 
-        xml.cac :PaymentMeans do
-          payment_means&.to_xml(xml)
+        if payment_means
+          xml.cac :PaymentMeans do
+            payment_means&.to_xml(xml)
+          end
         end
 
-        unless self.class.members[:payee_party].optional && payee_party.nil?
-          payee_party&.to_xml(xml)
+        payee_party&.to_xml(xml) unless self.class.members[:payee_party].optional && payee_party.nil?
+
+        unless payment_terms_note.blank?
+          xml.cac :PaymentTerms do
+            xml.cbc :Note, payment_terms_note
+          end
         end
 
-        xml.cac :PaymentTerms do
-          xml.cbc :Note, payment_terms_note
-        end
-
-        allowance_charges.each do |allowance_charge|
-          allowance_charge&.to_xml(xml)
-        end
+        allowance_charges.each { _1.to_xml(xml) }
 
         xml.cac :TaxTotal do
           tax_total&.to_xml(xml)
@@ -379,12 +407,53 @@ module Xrechnung
           legal_monetary_total&.to_xml(xml)
         end
 
-        invoice_lines.each do |invoice_line|
-          invoice_line&.to_xml(xml)
-        end
+        invoice_lines.each { _1.to_xml(xml) }
       end
 
       target
+    end
+
+    def update_amounts
+      self.tax_total = Xrechnung::TaxTotal.new
+
+      invoice_lines.each do |invoice_line|
+        tax_total.get_tax_subtotal(invoice_line.item.classified_tax_category).taxable_amount += invoice_line.line_extension_amount
+      end
+
+      allowance_charges.each do |ac|
+        element = tax_total.get_tax_subtotal(ac.tax_category)
+        if ac.charge_indicator
+          element.taxable_amount += ac.amount
+        else
+          element.taxable_amount -= ac.amount
+        end
+      end
+
+      tax_total.update_amounts
+
+      currency_id = tax_total.tax_amount.currency_id
+      zero        = Xrechnung::Currency.new(currency_id: currency_id, value: BigDecimal(0))
+
+      legal_monetary_total.line_extension_amount  = zero
+      legal_monetary_total.allowance_total_amount = zero
+      legal_monetary_total.charge_total_amount    = zero
+      legal_monetary_total.prepaid_amount       ||= zero
+
+      invoice_lines.each do |line|
+        legal_monetary_total.line_extension_amount += line.line_extension_amount
+      end
+
+      allowance_charges.each do |ac|
+        if ac.charge_indicator
+          legal_monetary_total.charge_total_amount += ac.amount
+        else
+          legal_monetary_total.allowance_total_amount += ac.amount
+        end
+      end
+
+      legal_monetary_total.tax_exclusive_amount = legal_monetary_total.line_extension_amount + legal_monetary_total.charge_total_amount - legal_monetary_total.allowance_total_amount
+      legal_monetary_total.tax_inclusive_amount = legal_monetary_total.tax_exclusive_amount + tax_total.tax_amount
+      legal_monetary_total.payable_amount       = legal_monetary_total.tax_inclusive_amount - legal_monetary_total.prepaid_amount
     end
   end
 end

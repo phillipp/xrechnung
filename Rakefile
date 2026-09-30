@@ -1,54 +1,54 @@
 require "pathname"
 require "bundler/gem_tasks"
 require "rspec/core/rake_task"
+require "httparty"
+require "zip"
 
+Zip.on_exists_proc = true
 RSpec::Core::RakeTask.new(:spec)
 
 task default: :spec
 
+Source = Data.define(:filename, :release_url)
+
+VALIDATOR_SOURCES = {
+  tool:      Source.new(
+    "validator/validator-1.6.2-standalone.jar",
+    "https://github.com/itplr-kosit/validator/releases/download/v1.6.2/validator-1.6.2-standalone.jar",
+  ),
+  scenarios: Source.new(
+    "validator/scenarios.xml",
+    "https://github.com/itplr-kosit/validator-configuration-xrechnung/releases/download/v2026-01-31/xrechnung-3.0.2-validator-configuration-2026-01-31.zip",
+  ),
+}.freeze
+
 namespace :validator do
-  VALIDATOR_SOURCES = {
-    tool:      {
-      filename:    "validator/validationtool-1.5.0-standalone.jar",
-      release_url: "https://github.com/itplr-kosit/validator/releases/download/v1.5.0/validator-1.5.0-distribution.zip",
-    },
-    scenarios: {
-      filename:    "validator/scenarios.xml",
-      release_url: "https://github.com/itplr-kosit/validator-configuration-xrechnung/releases/download/release-2024-10-31/validator-configuration-xrechnung_3.0.2_2024-10-31.zip",
-    },
-  }.freeze
+  VALIDATOR_SOURCES.each_value do |v|
+    base = Pathname.new(__dir__).join("validator").tap(&:mkpath)
 
-  VALIDATOR_SOURCES.each do |_, v|
-    base    = Pathname.new(__dir__).join("validator")
-    zipfile = base.join(File.basename(v[:release_url]))
+    file v.filename do
+      basename = base.join(File.basename(v.release_url))
 
-    file zipfile do
-      require "httparty"
+      res = HTTParty.get(v.release_url, follow_redirects: true)
+      File.binwrite(basename, res.body)
 
-      base.mkpath unless base.exist?
-
-      res = HTTParty.get(v[:release_url], follow_redirects: true)
-      File.open(zipfile, "wb") { |f| f.write res.body }
-    end
-
-    file v[:filename] => zipfile do
-      require "zip"
-
-      Zip::File.foreach(zipfile) do |entry|
-        entry.extract base.join(entry.name)
+      if basename.extname == ".zip"
+        Zip::File.foreach(basename) do |entry|
+          entry.extract destination_directory: base
+        end
       end
     end
   end
 
   desc "Download official validator and scenarios"
-  task download: VALIDATOR_SOURCES.map { |_, v| v[:filename] }
+  task download: VALIDATOR_SOURCES.values.map(&:filename)
 
   desc "Run validator on test fixtures"
   task run: :download do
     fixtures  = Pathname.new(__dir__).join("spec/fixtures/*.xml")
     output    = Pathname.new(__dir__).join("validator/results").tap(&:mkpath)
-    tool      = VALIDATOR_SOURCES[:tool][:filename]
-    scenarios = VALIDATOR_SOURCES[:scenarios][:filename]
+    tool      = VALIDATOR_SOURCES[:tool].filename
+    scenarios = VALIDATOR_SOURCES[:scenarios].filename
 
     sh "java -jar #{tool} -r validator -s #{scenarios} --output-directory #{output} --html #{fixtures}"
   end

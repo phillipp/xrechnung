@@ -1,4 +1,5 @@
 require "bundler/setup"
+require "debug"
 require "xrechnung"
 
 RSpec.configure do |config|
@@ -18,5 +19,20 @@ def to_xml(entity)
 end
 
 def expect_xml_eq_fixture(entity, fixture_base_name)
-  expect(to_xml(entity)).to eq File.read("spec/fixtures/scraps/#{fixture_base_name}.xml")
+  expect(to_xml(entity)).to match_fixture("scraps/#{fixture_base_name}")
+end
+
+RSpec::Matchers.define :match_fixture do |filename|
+  path = "spec/fixtures/#{filename}.xml"
+
+  match do |actual|
+    # Update fixtures?
+    File.write(path, actual) if ENV["WRITE_FIXTURES"] == "1"
+
+    @expected = File.read(path)
+    actual == @expected
+  end
+
+  diffable
+  attr_reader :expected
 end

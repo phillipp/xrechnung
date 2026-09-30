@@ -1,3 +1,3 @@
 module Xrechnung
-  VERSION = "0.4.0".freeze
+  VERSION = "0.7.4".freeze
 end
